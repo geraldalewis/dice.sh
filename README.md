@@ -36,13 +36,16 @@ $ dice d6, d12
 d6, d12 => 3, 11
 ```
 
-## Max function
+## Max / Min functions
 
-`max:A, B, ...:` returns the highest of any number of expressions:
+`max:A, B, ...:` returns the highest, `min:A, B, ...:` returns the lowest, of any number of expressions:
 
 ```
 $ dice max:d6,4:
 max:d6,4: => 4
+
+$ dice min:d6,4:
+min:d6,4: => 2
 
 $ dice max:1d4+1d8,1:
 max:1d4+1d8,1: => 7
@@ -53,8 +56,8 @@ max:1d6, 1d6+1, 4: => 5
 $ dice max:d6,4: + d4
 max:d6,4: + d4 => 8
 
-$ dice max:max:d4,d6:,3:
-max:max:d4,d6:,3: => 4
+$ dice min:max:d4,d6:,3:
+min:max:d4,d6:,3: => 3
 ```
 
 ## Installation

@@ -12,7 +12,8 @@ _skip_ws() {
 _parse_term() {
     _skip_ws
     local rest="${_EXPR:_POS}"
-    if [[ "$rest" =~ ^max: ]]; then
+    if [[ "$rest" =~ ^(max|min): ]]; then
+        local fn="${BASH_REMATCH[1]}"
         _POS=$((_POS + 4))
         local vals=()
         _parse_expr; vals+=("$_RESULT")
@@ -22,11 +23,12 @@ _parse_term() {
             _parse_expr; vals+=("$_RESULT")
             _skip_ws
         done
-        [[ "${_EXPR:_POS:1}" == ":" ]] || _dice_err "expected ':' to close max:"
+        [[ "${_EXPR:_POS:1}" == ":" ]] || _dice_err "expected ':' to close $fn:"
         _POS=$((_POS + 1))
         local best="${vals[0]}" v
         for v in "${vals[@]}"; do
-            if [[ "$v" -gt "$best" ]]; then best=$v; fi
+            if [[ "$fn" == "max" && "$v" -gt "$best" ]] || \
+               [[ "$fn" == "min" && "$v" -lt "$best" ]]; then best=$v; fi
         done
         _RESULT=$best
     elif [[ "$rest" =~ ^([0-9]*)d([0-9]+) ]]; then
@@ -81,13 +83,15 @@ MULTIPLE RESULTS
     dice d6 d12         => 3, 11
     dice d6, d12        => 3, 11
 
-MAX FUNCTION
+MAX / MIN FUNCTIONS
   max:A, B, ...:   return the highest of any number of expressions
+  min:A, B, ...:   return the lowest of any number of expressions
     dice max:d6,4:              => 4
+    dice min:d6,4:              => 2
     dice max:1d4+1d8,1:         => 7
     dice max:1d6, 1d6+1, 4:     => 5
     dice max:d6,4: + d4         => 8
-    dice max:max:d4,d6:,3:      => 4  (nested)
+    dice min:max:d4,d6:,3:      => 3  (nested)
 EOF
         exit 0
     fi
@@ -103,9 +107,9 @@ EOF
     len=${#str}
     local tokens=()
     while (( i < len )); do
-        if [[ "${str:i:4}" == "max:" ]]; then
+        if [[ "${str:i:4}" == "max:" || "${str:i:4}" == "min:" ]]; then
             depth=$(( depth + 1 ))
-            tok+="max:"
+            tok+="${str:i:4}"
             i=$(( i + 4 ))
             continue
         fi
