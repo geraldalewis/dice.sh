@@ -55,12 +55,16 @@ main() {
 
     [[ ${#groups[@]} -gt 0 ]] || _dice_err "no dice expressions found"
 
-    # Roll each group, summing dice within a group
+    # Roll each group, summing dice and constants within a group
     local results=()
     for group in "${groups[@]}"; do
         local sum=0 die val
         for die in $group; do
-            val=$(_roll "$die") || exit 1
+            if [[ "$die" =~ ^[0-9]+$ ]]; then
+                val="$die"
+            else
+                val=$(_roll "$die") || exit 1
+            fi
             sum=$((sum + val))
         done
         results+=("$sum")
