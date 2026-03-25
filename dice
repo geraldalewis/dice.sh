@@ -2,75 +2,140 @@
 
 _dice_err() { printf 'dice: %s\n' "$*" >&2; exit 1; }
 
-# Roll NdM, print result to stdout; exit 1 on invalid expression
-_roll() {
-    local expr="$1"
-    [[ "$expr" =~ ^([0-9]*)d([0-9]+)$ ]] \
-        || _dice_err "invalid expression '$expr' (expected NdM or dM, e.g. 1d6 or d6)"
-    local n="${BASH_REMATCH[1]:-1}" m="${BASH_REMATCH[2]}"
-    [[ "$m" -gt 0 ]] || _dice_err "die must have at least 1 side"
-    local total=0 i
-    for ((i = 0; i < n; i++)); do
-        total=$((total + RANDOM % m + 1))
-    done
-    printf '%d' "$total"
+# --- Recursive descent evaluator (globals avoid subshells) ---
+_EXPR="" _POS=0 _RESULT=0
+
+_skip_ws() {
+    while [[ "${_EXPR:_POS:1}" == " " ]]; do _POS=$((_POS + 1)); done
 }
 
+_parse_term() {
+    _skip_ws
+    local rest="${_EXPR:_POS}"
+    if [[ "$rest" =~ ^max: ]]; then
+        _POS=$((_POS + 4))
+        local vals=()
+        _parse_expr; vals+=("$_RESULT")
+        _skip_ws
+        while [[ "${_EXPR:_POS:1}" == "," ]]; do
+            _POS=$((_POS + 1))
+            _parse_expr; vals+=("$_RESULT")
+            _skip_ws
+        done
+        [[ "${_EXPR:_POS:1}" == ":" ]] || _dice_err "expected ':' to close max:"
+        _POS=$((_POS + 1))
+        local best="${vals[0]}" v
+        for v in "${vals[@]}"; do
+            if [[ "$v" -gt "$best" ]]; then best=$v; fi
+        done
+        _RESULT=$best
+    elif [[ "$rest" =~ ^([0-9]*)d([0-9]+) ]]; then
+        local n="${BASH_REMATCH[1]:-1}" m="${BASH_REMATCH[2]}"
+        [[ "$m" -gt 0 ]] || _dice_err "die must have at least 1 side"
+        _POS=$((_POS + ${#BASH_REMATCH[0]}))
+        local total=0 i
+        for ((i = 0; i < n; i++)); do total=$((total + RANDOM % m + 1)); done
+        _RESULT=$total
+    elif [[ "$rest" =~ ^([0-9]+) ]]; then
+        _POS=$((_POS + ${#BASH_REMATCH[0]}))
+        _RESULT="${BASH_REMATCH[0]}"
+    else
+        _dice_err "unexpected token: '${rest:0:20}'"
+    fi
+}
+
+_parse_expr() {
+    _parse_term; local val=$_RESULT
+    _skip_ws
+    while [[ "${_EXPR:_POS:1}" == "+" ]]; do
+        _POS=$((_POS + 1))
+        _parse_term
+        val=$(( val + _RESULT ))
+        _skip_ws
+    done
+    _RESULT=$val
+}
+
+_eval() { _EXPR="$1"; _POS=0; _parse_expr; }
+
+# --- Main ---
 main() {
     [[ $# -gt 0 ]] || {
-        printf 'Usage: dice <NdM> [+ <NdM> ...]\n' >&2
-        printf 'Examples:\n  dice 1d6\n  dice 1d6 1d12\n  dice 2d6 + 1d4\n' >&2
+        printf 'Usage: dice <expr> [<expr> ...]\n' >&2
+        printf 'Examples:\n  dice d6\n  dice d6 d12\n  dice 2d6 + 1d4\n  dice max:d6,4:\n' >&2
         exit 1
     }
 
-    # Tokenize: commas are separators; split "1d6+1d8" into ["1d6", "+", "1d8"]
+    # Paren-aware tokenization: 'max:' increments depth, ':' at depth>0 decrements it.
+    # Inside max:...: everything is literal. Outside, '+'/','/' ' are delimiters.
+    local str="$*" len i=0 depth=0 tok="" c
+    len=${#str}
     local tokens=()
-    for arg in "$@"; do
-        local normalized="${arg//,/ }"
-        normalized="${normalized//+/ + }"
-        read -ra parts <<< "$normalized"
-        for part in "${parts[@]}"; do
-            [[ -n "$part" ]] && tokens+=("$part")
-        done
+    while (( i < len )); do
+        if [[ "${str:i:4}" == "max:" ]]; then
+            depth=$(( depth + 1 ))
+            tok+="max:"
+            i=$(( i + 4 ))
+            continue
+        fi
+        c="${str:i:1}"
+        if [[ "$c" == ":" && depth -gt 0 ]]; then
+            depth=$(( depth - 1 ))
+            tok+="$c"
+        elif (( depth > 0 )); then
+            tok+="$c"
+        else
+            case "$c" in
+                ' '|',')
+                    [[ -n "${tok// /}" ]] && { tokens+=("${tok// /}"); tok=""; }
+                    [[ "$c" == "," ]] && tokens+=(",")
+                    ;;
+                '+')
+                    [[ -n "${tok// /}" ]] && { tokens+=("${tok// /}"); tok=""; }
+                    tokens+=("+")
+                    ;;
+                *) tok+="$c" ;;
+            esac
+        fi
+        i=$(( i + 1 ))
     done
+    [[ -n "${tok// /}" ]] && tokens+=("${tok// /}")
 
-    # Group tokens:
-    #   '+' joins adjacent dice into the same group (summed together)
-    #   space/comma between dice (no '+') = separate groups (shown individually)
+    # Group tokens: '+' joins terms into one summed group; ',' or adjacent terms = separate groups
     local groups=() current=() prev_plus=false
     for tok in "${tokens[@]}"; do
-        if [[ "$tok" == "+" ]]; then
-            prev_plus=true
-        else
-            if [[ "$prev_plus" == true ]]; then
-                current+=("$tok")  # join to current group
-            else
+        case "$tok" in
+            '+') prev_plus=true ;;
+            ',')
                 [[ ${#current[@]} -gt 0 ]] && groups+=("${current[*]}")
-                current=("$tok")   # start new group
-            fi
-            prev_plus=false
-        fi
+                current=(); prev_plus=false
+                ;;
+            *)
+                if [[ "$prev_plus" == true ]]; then
+                    current+=("$tok")
+                else
+                    [[ ${#current[@]} -gt 0 ]] && groups+=("${current[*]}")
+                    current=("$tok")
+                fi
+                prev_plus=false
+                ;;
+        esac
     done
     [[ ${#current[@]} -gt 0 ]] && groups+=("${current[*]}")
+    [[ ${#groups[@]} -gt 0 ]] || _dice_err "no expressions found"
 
-    [[ ${#groups[@]} -gt 0 ]] || _dice_err "no dice expressions found"
-
-    # Roll each group, summing dice and constants within a group
     local results=()
     for group in "${groups[@]}"; do
-        local sum=0 die val
-        for die in $group; do
-            if [[ "$die" =~ ^[0-9]+$ ]]; then
-                val="$die"
-            else
-                val=$(_roll "$die") || exit 1
-            fi
-            sum=$((sum + val))
+        local terms group_expr j
+        read -ra terms <<< "$group"
+        group_expr="${terms[0]}"
+        for ((j = 1; j < ${#terms[@]}; j++)); do
+            group_expr+=" + ${terms[$j]}"
         done
-        results+=("$sum")
+        _eval "$group_expr"
+        results+=("$_RESULT")
     done
 
-    # Output: "input => r1, r2, ..."
     local result_str
     printf -v result_str '%s, ' "${results[@]}"
     printf '%s => %s\n' "$*" "${result_str%, }"
