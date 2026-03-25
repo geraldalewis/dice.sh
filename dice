@@ -5,9 +5,9 @@ _dice_err() { printf 'dice: %s\n' "$*" >&2; exit 1; }
 # Roll NdM, print result to stdout; exit 1 on invalid expression
 _roll() {
     local expr="$1"
-    [[ "$expr" =~ ^([0-9]+)d([0-9]+)$ ]] \
-        || _dice_err "invalid expression '$expr' (expected NdM, e.g. 1d6)"
-    local n="${BASH_REMATCH[1]}" m="${BASH_REMATCH[2]}"
+    [[ "$expr" =~ ^([0-9]*)d([0-9]+)$ ]] \
+        || _dice_err "invalid expression '$expr' (expected NdM or dM, e.g. 1d6 or d6)"
+    local n="${BASH_REMATCH[1]:-1}" m="${BASH_REMATCH[2]}"
     [[ "$m" -gt 0 ]] || _dice_err "die must have at least 1 side"
     local total=0 i
     for ((i = 0; i < n; i++)); do
