@@ -60,9 +60,40 @@ _eval() { _EXPR="$1"; _POS=0; _parse_expr; }
 
 # --- Main ---
 main() {
+    if [[ "${1:-}" == "--help" ]]; then
+        cat <<'EOF'
+Usage: dice <expr> [<expr> ...]
+
+Roll dice expressions and print results.
+
+EXPRESSIONS
+  dM          roll one M-sided die         d6, d20
+  NdM         roll N M-sided dice, sum     2d6, 3d8
+  N           constant                     4, 10
+  A + B       sum expressions              d6 + 4, 2d8 + 1d4
+
+  Expressions can be combined freely:
+    dice 2d6 + d4 + 3
+
+MULTIPLE RESULTS
+  Space- or comma-separated expressions are rolled independently
+  and displayed as a list:
+    dice d6 d12         => 3, 11
+    dice d6, d12        => 3, 11
+
+MAX FUNCTION
+  max:A, B, ...:   return the highest of any number of expressions
+    dice max:d6,4:              => 4
+    dice max:1d4+1d8,1:         => 7
+    dice max:1d6, 1d6+1, 4:     => 5
+    dice max:d6,4: + d4         => 8
+    dice max:max:d4,d6:,3:      => 4  (nested)
+EOF
+        exit 0
+    fi
     [[ $# -gt 0 ]] || {
         printf 'Usage: dice <expr> [<expr> ...]\n' >&2
-        printf 'Examples:\n  dice d6\n  dice d6 d12\n  dice 2d6 + 1d4\n  dice max:d6,4:\n' >&2
+        printf 'Run "dice --help" for full usage.\n' >&2
         exit 1
     }
 
